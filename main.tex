@@ -16,12 +16,13 @@
 \usepgfplotslibrary{polar}
 \usepackage{csvsimple} % Creating tables based on CSV's
 \usepackage{lscape} % Landscape pages (\begin{landscape})
-\usetikzlibrary{external} % Caching images
-\tikzexternalize[prefix=tikz/] % Caching images
+%%\usetikzlibrary{external} % Caching images
+%\tikzexternalize[prefix=tikz/] % Caching images
 \usepackage{subfig}  % Multiple figures in a row
 \DeclareSIUnit\torr{Torr}
 \usepackage{rotating}
 \usepackage{pdflscape}
+\usetikzlibrary{shapes.geometric, arrows}
 
 \title{Ion Gauge Controller}
 \author{Jakub Jendryka}
@@ -213,7 +214,7 @@ To increase separation of copper from the high voltage nets in grid power supply
 
 \section{Software}
 Main factor driving the software design was the need to conform to the EuroMeasure standard. Within this standard each module has an address and a set of commands that it can execute.
-Each commands can have multiple arguments and it also can return multiple values. Each module also must implement a basic set of commands used for automatic functionality discovery. When interrogated is should describe all commands it implements.
+Each command can have multiple arguments and it also can return multiple values. Each module also must implement a basic set of commands used for automatic functionality discovery. When interrogated is should describe all commands it implements.
 Commands are sent through an I2C interface in a binary format. Most of the EuroMeasure interface is implemented in a dedicated library, so functionality such as standard commands, I2C interface handling and command registration doesn't need to be reimplemented.
 Additional commands that need to be implemented are:
 \begin{itemize}
@@ -221,5 +222,84 @@ Additional commands that need to be implemented are:
 	\item Reading the pressure
 	\item Reading diagnostic values, such as emission current and heating power
 \end{itemize}
-Apart from listening to the commands, this module has to continously execute a control loop for stabilizing the emission current and monitor the safety of the cathode which should be disabled in case of to high pressure.
+Apart from listening to the commands, this module has to continously execute a control loop for stabilizing the emission current and monitor the safety of the cathode which should be disabled in case of too high pressure.
+Main flow of the program is represented in figure \ref{fig:diagram}, however due to heavy use of interrupts,
+it doesn't adequately describe the full operation. To do that aditional diagrams are needed presented in figure \ref{fig:i2c_diagram} and \ref{fig:adc_diagram} which describe I2C interupt handler and ADC interupt handler accordingly.
+
+\tikzstyle{startstop} = [rectangle, rounded corners, minimum width=2cm, minimum height=1cm,text centered, draw=black, fill=red!30]
+\tikzstyle{io} = [trapezium, trapezium stretches=true, trapezium left angle=70, trapezium right angle=110, minimum width=2cm, minimum height=1cm, text centered, draw=black, fill=blue!30]
+\tikzstyle{process} = [rectangle, minimum width=2cm, minimum height=1cm, text centered, draw=black, fill=orange!30]
+\tikzstyle{decision} = [diamond, aspect=2, minimum width=2cm, minimum height=1cm, text centered, draw=black, fill=green!30]
+\tikzstyle{arrow} = [thick,->,>=stealth]
+\tikzstyle{line} = [thick, >=stealth]
+\begin{figure}[H]
+	\centering
+	\begin{tikzpicture}[node distance=2cm]
+		\node (start)[startstop]{Start};
+		\node (init)[process, below of=start]{Initialize ADC and DCDC};
+		\node (cathode_on)[decision, below of=init]{Is cathode on?};
+		\node (wait)[process, left of=cathode_on, xshift=-2cm]{Wait};
+		\node (pressure_ok)[decision, below of=cathode_on]{Is pressure ok?};
+		\node (disable)[io, right of=pressure_ok, xshift=2cm]{Disable cathode};
+		\node (adj_v)[io, below of=pressure_ok]{Adjust cathode voltage};
+
+		\draw [arrow](start)--(init);
+		\draw [arrow](init)--(cathode_on);
+		\draw [arrow](cathode_on)--node[anchor=south]{No}(wait);
+		\draw [arrow](cathode_on)--node[anchor=west]{Yes}(pressure_ok);
+		\draw [arrow](pressure_ok)--node[anchor=south]{No}(disable);
+		\draw [arrow](pressure_ok)--node[anchor=west]{Yes}(adj_v);
+		\draw [line](wait)--++(0, 1.25cm)-|(cathode_on);
+		\draw [line](disable)--++(0, 3.25cm)-|(cathode_on);
+		\draw [line](adj_v)--++(7cm, 0)--++(0, 5.25cm)-|(cathode_on);
+	\end{tikzpicture}
+	\caption{Main flow diagram}
+	\label{fig:diagram}
+\end{figure}
+\begin{figure}[H]
+	\centering
+	\begin{tikzpicture}[node distance=2cm]
+		\node (start)[startstop]{I2C interrupt};
+		\node (receive)[io, below of=start]{Receive I2C message};
+		\node (select)[decision, below of=receive]{Select command handler};
+		\node (enable)[process, below of=select, xshift=3cm]{Enable cathode};
+		\node (disable)[process, below of=select, yshift=-2cm, xshift=3cm]{Disable cathode};
+		\node (measure)[io, below of=select, yshift=-4cm, xshift=3cm]{Return last pressure};
+		\node (dotdotdot)[process, below of=select, yshift=-6cm, xshift=3cm]{...};
+
+
+
+		\draw [arrow](start)--(receive);
+		\draw [arrow](receive)--(select);
+		\draw [arrow](select)|-(enable);
+		\draw [arrow](select)|-(disable);
+		\draw [arrow](select)|-(measure);
+		\draw [arrow](select)|-(dotdotdot);
+		%\draw [arrow](cathode_on)--node[anchor=west]{Yes}(pressure_ok);
+		%\draw [arrow](pressure_ok)--node[anchor=south]{No}(disable);
+		%\draw [arrow](pressure_ok)--node[anchor=west]{Yes}(adj_v);
+		%\draw [line](wait)--++(0, 1.25cm)-|(cathode_on);
+		%\draw [line](disable)--++(0, 3.25cm)-|(cathode_on);
+		%\draw [line](adj_v)--++(7cm, 0)--++(0, 5.25cm)-|(cathode_on);
+	\end{tikzpicture}
+	\caption{I2C interrupt handler diagram}
+	\label{fig:i2c_diagram}
+\end{figure}
+\begin{figure}[H]
+	\centering
+	\begin{tikzpicture}[node distance=2cm]
+		\node (start)[startstop]{DRDY low interrupt};
+		\node (transaction)[io, below of=start]{Get values from ADC};
+		\node (parse)[process, below of=transaction]{Calculate currents and pressure};
+		\node (store)[process, below of=parse]{Store values};
+
+		\draw [arrow](start)--(transaction);
+		\draw [arrow](transaction)--(parse);
+		\draw [arrow](parse)--(store);
+
+	\end{tikzpicture}
+	\caption{ADC interrupt handler diagram}
+	\label{fig:adc_diagram}
+\end{figure}
+
 \end{document}

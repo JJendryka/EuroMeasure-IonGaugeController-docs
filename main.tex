@@ -83,9 +83,9 @@ There are three right-angle IDC10 connectors at the back edge of the board. One 
 Connector for the vacuum gauge should be mounted to the front panel. The device is expected to operate in standard laboratory conditions.
 It should emit as little as possible EMI, and should not backfeed noise onto $\pm$\SI{15}{\volt} power supply rails and should disable hazardous voltages when lockout line is not energized.
 
-\section{Design}
+\section{Schematic}
 
-Block diagram of the design is presented in figure \ref{fig:block_diagram}. It also serves as top level schematic sheet.
+Block diagram of the design is presented on the next page. It also serves as top level schematic sheet.
 Starting with the gauge it is connected to the controller using a single connector. Each of the electrodes is supplied by a separate switchmode power supply.
 Anode and grid power supplies are constant voltage, not controllable power supplies with galvanicly isolated output. This allows for easy current measurement on the low side of the supply.
 Cathode supply is programmable constant voltage switchmode supply. Using current measurement data from the grid, microcontroller can modify output voltage to stabilize emission current at required level.
@@ -94,14 +94,7 @@ As cathode response is not very fast due to its thermal mass it was decided to u
 Every important parameter is digitized in the ADC block and processed by the microcontroller. Power and interface are connected through the backplane connector.
 To minimize backfed noise, voltages suppling power supplies are filtered.
 
-\begin{landscape}
-	\begin{figure}
-		\begin{center}
-			\includegraphics[width=1.5\textwidth]{figures/block_diagram.pdf}
-		\end{center}
-		\caption{Block diagram}\label{fig:block_diagram}
-	\end{figure}
-\end{landscape}
+\includepdf[landscape=true, pages=1]{figures/schematic.pdf}
 
 
 
@@ -140,14 +133,93 @@ It's output voltage is set using R22 and R22 according to the equation \ref{eq:a
 	\label{eq:anode_output_voltage}
 \end{equation}
 
-\includepdf[landscape=true, pages=4]{figures/schematic.pdf}
-
-\section{Anode current measurement}
+\subsection{Anode current measurement}
 Anode current measurement is the most critical measurement in the whole device. Due to this extra care must be taken. Transimpedance amplifier configuration was considered, however stability concerns dictated the change to the current configuration.
 Anode current is measured using R41 \SI{1}{\kilo\ohm} resistor. This gives voltage of \SI{0.1}{\volt} for full range of \SI{100}{\micro\ampere}. This voltage shift should not influence the measurement significantly as it is only a \SI{0.4}{\%} change.
 Due to voltage in the low measurement range being only \SI{10}{\micro\volt} a low offset precision op-amp is needed for amplification of the signal.
 OPA2187 was selected as it specifies low offset voltage of \SI{10}{\micro\volt} with drift of only \SI{0.001}{\micro\volt/\kelvin} and bias current of \SI{100}{\pico\ampere}.
 It is used to provide a gain of x11 to more fully utilise ADC range. Diode DZ3 is added for ADC protection.
+
+\includepdf[landscape=true, pages=4]{figures/schematic.pdf}
 \includepdf[landscape=true, pages=7]{figures/schematic.pdf}
 
+\subsection{Grid supply}
+Grid requires the highest of all needed voltages. To generate it, Royer converter topology was selected due to its very low noise. The whole supply is heavily inspired by AN-118 note by Jim Williams.
+Resonant Royer converter is a self-oscillating circuit that uses core saturation as means of limiting the oscillation. Due to it's sinusoidal waveforms, no high frequency switching noise is generated.
+Main LC tank is created with the transformer primary winding and capacitor C11. Transistors Q1 and Q3 are driven alternately in sync with the LC tank by a transformer feedback winding.
+Transformer output is rectified with a full bridge rectifier and further filtered. The circuit has two feedback paths, one AC and one DC. DC path is used to accurately control the output voltage, while AC improves transient response by bypassing the output filter.
+The resonant converter output amplitude is controlled by controlling current going to the converter with Q2. Output voltage is settable by changing the resistive divider in the DC feedback path (R13 and R14).
+
+\subsection{Grid current measurement}
+Due to low precision needed, relatively high current and output voltage, measuring the grid current by means of a simple resistor is sufficient. Voltage from the resistor is filtered and limited by DZ3 diode to protect the ADC.
+With two \SI{100}{\ohm} resistors, the circuit has a sensitivity of \SI{0.2}{\volt/\milli\ampere} which gives \SI{1}{\volt} for nominal emission current, while ADC range is \SI{1.2}{\volt}.
+
+\includepdf[landscape=true, pages=3]{figures/schematic.pdf}
+\includepdf[landscape=true, pages=8]{figures/schematic.pdf}
+
+\subsection{Cathode supply}
+Cathode supply has to provide the most wattage in comparison to anode and grid supplies. Its parameters are also least crucial as it is only used to heat the cathode and it doesn't need galvanic isolation for precise current measurement.
+It however needs to be controllable to stabilize the emission current, but this control loop doesn't have to work at high frequency.
+It was decided to use a modern integrated DCDC converter IC. TPS55289 was selected. It allows to control the output voltage from I2C bus without complicated circuitry. It also has undervoltage protection, current monitoring, overcurrent protection and more.
+The IC is implemented according to the datasheet and using spreadsheet provided by the manufacturer. To provide the required power it was decided to use the \SI{15}{\volt} rail. To not backfeed noise onto this rail, a filer is used. Capacitors C27 and C37 were selected to have very low ESR to limit ripple.
+Undervoltage lockout was set using R27 and R28 to \SI{13.8}{\volt} according to the equation \ref{eq:cathode_uvlo}.
+\begin{equation}
+	U_{UVLO} = \SI{1.23}{\volt}\cdot\left(1+\frac{R_{27}}{R_{28}}\right) = \SI{13.8}{\volt}
+	\label{eq:cathode_uvlo}
+\end{equation}
+In case of too much switching noise, additional snubber circuits are planned however not populated right now. Frequency dithering is disabled, however to enable it R26 needs to be replaced with a capacitor. Example value in \SI{10}{\nano\farad}.
+External feedback is also not connected by default as it most probably won't be neccessery. To enable it R34 resistor needs to be populated and it needs to be enabled in IC configuration registers. Address of the IC is set to 0x75 by connecting MODE pin to ground.
+Switching frequency is set using R29 and its value is calculated using equation \ref{eq:cathode_freq}.
+\begin{equation}
+	f = \frac{1000}{0.05*R_{29}+35} = \SI{420}{\kilo\hertz}
+	\label{eq:cathode_freq}
+\end{equation}
+To reduce heating of the IC, \SI{5}{\volt} is supplied to it externaly, instead of relying on internal voltage regulator. To do this EXTVCC pin had to be connected to logic low, and 5V needed to be connected to VCC.
+Current measurement functionality of the IC is also utilised. Current is measured using a shunt resistor R32. A small value of \SI{20}{\milli\ohm} was selected to limit the voltage drop to \SI{30}{\milli\volt}.
+Voltage drop on the resistor is amplified in the IC by a factor of 20 and output on pin CDC. Output voltage is also measured by the ADC to control whether the converter is operating correctly.
+\includepdf[landscape=true, pages=5]{figures/schematic.pdf}
+
+\subsection{ADC}
+To measure all required voltages a dedicated analog to digital converter is used. There are 4 signals that need to be digitized: anode current, grid current, cathode current and cathode voltage.
+ADS131M04 was selected as it offers 4 simultaneous channels, precision required for anode current measurement without ranging and was already used in other module of EuroMeasure system.
+Its a 24 bit sigma delta ADC with integrated digital averaging and filtering, high precision voltage reference and programmable gain amplifier.
+It communicates with the microcontroller using \SI{3.3}{\volt} SPI interface and two additional signals: DRDY(data ready) and RESET.
+It required an external clock source. It is implemented using a \SI{8.192}{\mega\hertz} oscillator, as specified in the datasheet.
+It is powered from \SI{3.3}{\volt} rail with additional filtering.
+All signals connected to the IC are already in the correct $\pm$\SI{1.2}{\volt} range.
+
+\includepdf[landscape=true, pages=6]{figures/schematic.pdf}
+
+\subsection{Microcontroller}
+An STM32G0 is used as a microcontroller on this board. It is used in almost all other EuroMeasure modules. Its implementation is also standard between them. It's clocked with a \SI{16}{\mega\hertz} oscillator.
+It is powered using \SI{3.3}{\volt} rail generated using a voltage regulator. It's connected to all digital interfaces on the board: DCDC's I2C, ADC's SPI and EuroMeasure signals connected from backplane.
+It is also connected to a debug connector with UART and SWD for programming and debuging. For status indication one red LED and one programmable RGB led are used.
+All of the digital interfaces use \SI{3.3}{\volt} logic so no voltage translation is needed. To select adress in the EuroMeasure system a DIP switch is used or, alternatively solderable jumpers.
+\includepdf[landscape=true, pages=2]{figures/schematic.pdf}
+\includepdf[landscape=true, pages=10]{figures/schematic.pdf}
+\includepdf[landscape=true, pages=9]{figures/schematic.pdf}
+
+\section{Layout}
+The controller is layed out on a single $100\times100\si{\milli\meter}$ two layer PCB.
+Almost all components needed to be placed on the top side of the PCB due to height limitations.
+Mounting hole as well as backplane connector positions are specified by the EuroMeasure standard.
+Microcontroller as well as PSU sections are used on other boards therefore their layout is a copy of already existing designs and is placed on the right side of the board, near the backplane connection.
+The most noise sensitive measurement is that of anode current so this circuit is placed further from potential noise emitting sections such as cathode power supply.
+To also limit the emissions, all high current loops in the DCDC converters are routed as small as possible and a ground plane is used on the bottom layer with via stitching used where it is not continous.
+Via stiching was also used around the anode power supply to make sure that none of the currents from other converters go near it.
+Some components on the board, such as power transistors, voltage regulators and cathode DCDC converter IC produce a lot of heat, therefore additional copper pours are placed on their heat dissapating pins.
+To increase separation of copper from the high voltage nets in grid power supply a keep-out zone was created where no copper pour will be generated.
+
+
+\section{Software}
+Main factor driving the software design was the need to conform to the EuroMeasure standard. Within this standard each module has an address and a set of commands that it can execute.
+Each commands can have multiple arguments and it also can return multiple values. Each module also must implement a basic set of commands used for automatic functionality discovery. When interrogated is should describe all commands it implements.
+Commands are sent through an I2C interface in a binary format. Most of the EuroMeasure interface is implemented in a dedicated library, so functionality such as standard commands, I2C interface handling and command registration doesn't need to be reimplemented.
+Additional commands that need to be implemented are:
+\begin{itemize}
+	\item Switching cathode heating ON/OFF
+	\item Reading the pressure
+	\item Reading diagnostic values, such as emission current and heating power
+\end{itemize}
+Apart from listening to the commands, this module has to continously execute a control loop for stabilizing the emission current and monitor the safety of the cathode which should be disabled in case of to high pressure.
 \end{document}

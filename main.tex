@@ -23,6 +23,7 @@
 \usepackage{rotating}
 \usepackage{pdflscape}
 \usetikzlibrary{shapes.geometric, arrows}
+\usepackage{listings}
 
 \title{Ion Gauge Controller}
 \author{Jakub Jendryka}
@@ -301,5 +302,16 @@ it doesn't adequately describe the full operation. To do that aditional diagrams
 	\caption{ADC interrupt handler diagram}
 	\label{fig:adc_diagram}
 \end{figure}
+
+\subsection{Code snippets}
+\subsection{ADC data acquisition}
+Listing \ref{lst:adc} shows code responsible for acquiring samples from the ADC. It is called within interrupt handler subroutine for DRDY pin change. To download the data from ADC an SPI transaction is performed.
+ADC is configured to communicate in 24-bit words, therefore each word takes up 3 bytes. ADC talks with standardized transactions,
+every frame send by the ADC consists of response from last command (if no command was issued it returns STATUS register contents), data from each of 4 channels and a CRC code.
+Endianess of ADC data doesn't match MCU endianess therefore bytes need to be swaped. Special consideration also needs to be taken as data is supplied in two's complement format and in 24-bit format, whereas native word size for the MCU is 32-bit.
+SPI_transaction function is written to handle bidirectional data transfer.
+\lstinputlisting[language=C, tabsize=2, showspaces=false, xleftmargin=0cm, frame=tblr, breaklines=true, caption=Code acquiring data from ADC, label=lst:adc]{code/adc.c}
+
+
 
 \end{document}
